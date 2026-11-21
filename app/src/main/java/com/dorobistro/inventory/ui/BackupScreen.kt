@@ -19,8 +19,6 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -80,7 +78,7 @@ fun BackupScreen(vm: InventoryViewModel, showMessage: (String) -> Unit) {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         ScreenHeader("Backup & restore", "Your data is stored only on this tablet")
-        Column(Modifier.padding(horizontal = 24.dp).widthIn(max = 720.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.padding(horizontal = 28.dp).widthIn(max = 760.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             InfoCard(
                 Icons.Outlined.PhoneAndroid,
                 "Stored on this device",
@@ -105,7 +103,7 @@ fun BackupScreen(vm: InventoryViewModel, showMessage: (String) -> Unit) {
                 }
             }
             if (items.isEmpty()) {
-                BackupCard(Icons.Outlined.PhoneAndroid, "Try it out", "Load a dozen sample bistro items and suppliers to explore the app.") {
+                BackupCard(Icons.Outlined.PhoneAndroid, "Try it out", "Load sample bistro items and suppliers with four weeks of history to explore forecasts and insights.") {
                     OutlinedButton(onClick = { vm.loadSampleData(); showMessage("Sample data loaded") }) { Text("Load samples") }
                 }
             }
@@ -136,12 +134,12 @@ fun BackupScreen(vm: InventoryViewModel, showMessage: (String) -> Unit) {
 
 @Composable
 private fun InfoCard(icon: ImageVector, title: String, body: String) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+    AppCard(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            IconBadge(icon, Tone.Accent)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                Text(body, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -149,9 +147,9 @@ private fun InfoCard(icon: ImageVector, title: String, body: String) {
 
 @Composable
 private fun BackupCard(icon: ImageVector, title: String, body: String, action: @Composable () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+    AppCard(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+            IconBadge(icon, Tone.Info)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)

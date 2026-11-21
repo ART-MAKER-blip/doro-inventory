@@ -22,10 +22,9 @@ import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.LocalShipping
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -55,7 +54,7 @@ fun SuppliersScreen(vm: InventoryViewModel) {
     val itemCounts = items.groupingBy { it.supplierId }.eachCount()
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader("Suppliers", "${suppliers.size} suppliers") {
+        ScreenHeader("Suppliers", "${suppliers.size} suppliers · lead times drive the order-by dates in Forecast") {
             Button(onClick = { creating = true }) {
                 Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(8.dp)); Text("Add supplier")
             }
@@ -67,23 +66,29 @@ fun SuppliersScreen(vm: InventoryViewModel) {
             return@Column
         }
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(320.dp),
-            contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            columns = GridCells.Adaptive(340.dp),
+            contentPadding = PaddingValues(start = 28.dp, end = 28.dp, bottom = 28.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             items(suppliers, key = { it.id }) { s ->
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(s.name, style = MaterialTheme.typography.titleLarge)
-                        val n = itemCounts[s.id] ?: 0
-                        Text("$n item${if (n == 1) "" else "s"}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                AppCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconBadge(Icons.Outlined.LocalShipping, Tone.Info)
+                            Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                                Text(s.name, style = MaterialTheme.typography.titleMedium)
+                                val n = itemCounts[s.id] ?: 0
+                                Text("$n item${if (n == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        ContactLine(Icons.Outlined.Schedule, "Delivers ${s.leadTimeDays} day${if (s.leadTimeDays == 1) "" else "s"} after ordering")
                         if (s.contactName.isNotBlank()) ContactLine(Icons.Outlined.Person, s.contactName)
                         if (s.phone.isNotBlank()) ContactLine(Icons.Outlined.Phone, s.phone)
                         if (s.email.isNotBlank()) ContactLine(Icons.Outlined.Email, s.email)
                         if (s.notes.isNotBlank()) Text(s.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = { deleting = s }) { Text("Delete") }
+                            TextButton(onClick = { deleting = s }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
                             TextButton(onClick = { editing = s }) { Text("Edit") }
                         }
                     }
@@ -125,6 +130,8 @@ private fun SupplierEditorDialog(initial: Supplier?, onDismiss: () -> Unit, onSa
     var phone by remember { mutableStateOf(initial?.phone ?: "") }
     var email by remember { mutableStateOf(initial?.email ?: "") }
     var notes by remember { mutableStateOf(initial?.notes ?: "") }
+    var lead by remember { mutableStateOf((initial?.leadTimeDays ?: 2).toString()) }
+    val leadDays = lead.trim().toIntOrNull()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -139,15 +146,27 @@ private fun SupplierEditorDialog(initial: Supplier?, onDismiss: () -> Unit, onSa
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(email, { email = it }, label = { Text("Email") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = lead,
+                    onValueChange = { v -> if (v.length <= 2 && v.all { it.isDigit() }) lead = v },
+                    label = { Text("Lead time") },
+                    suffix = { Text("days") },
+                    singleLine = true,
+                    isError = leadDays == null,
+                    supportingText = { Text("Days from placing an order to delivery. The forecast uses this to tell you when to order.") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 OutlinedTextField(notes, { notes = it }, label = { Text("Notes") }, placeholder = { Text("Delivery days, minimum order…") },
                     minLines = 2, modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
-            Button(enabled = name.isNotBlank(), onClick = {
+            Button(enabled = name.isNotBlank() && leadDays != null, onClick = {
                 onSave(
                     (initial ?: Supplier(name = "")).copy(
                         name = name.trim(), contactName = contact.trim(), phone = phone.trim(), email = email.trim(), notes = notes.trim(),
+                        leadTimeDays = leadDays ?: 2,
                     )
                 )
             }) { Text("Save") }

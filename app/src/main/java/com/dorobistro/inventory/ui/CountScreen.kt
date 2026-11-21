@@ -14,8 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -52,7 +51,8 @@ fun CountScreen(vm: InventoryViewModel, showMessage: (String) -> Unit) {
         .groupBy { it.category.ifBlank { "Uncategorized" } }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader("Stock count", "Enter what's actually on the shelf. Leave an item blank to skip it.") {
+        val counted = counts.count { (id, v) -> parseNum(v) != null && items.any { it.id == id } }
+        ScreenHeader("Stock count", "Walk the shelves and enter what's actually there. Leave an item blank to skip it.") {
             if (counts.isNotEmpty()) TextButton(onClick = { counts.clear() }) { Text("Clear all") }
         }
         if (items.isEmpty()) {
@@ -64,20 +64,32 @@ fun CountScreen(vm: InventoryViewModel, showMessage: (String) -> Unit) {
             placeholder = { Text("Jump to item or category") },
             leadingIcon = { Icon(Icons.Outlined.Search, null) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp),
         )
+        Column(Modifier.padding(horizontal = 28.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                "$counted of ${items.size} items counted",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LinearProgressIndicator(
+                progress = { if (items.isEmpty()) 0f else counted.toFloat() / items.size },
+                modifier = Modifier.fillMaxWidth(),
+                drawStopIndicator = {},
+            )
+        }
         LazyColumn(
             Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
+            contentPadding = PaddingValues(start = 28.dp, end = 28.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             grouped.forEach { (cat, list) ->
                 item(key = "h-$cat") {
                     Text(
                         cat,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                        modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
                     )
                 }
                 items(list, key = { it.id }) { item ->
@@ -85,8 +97,8 @@ fun CountScreen(vm: InventoryViewModel, showMessage: (String) -> Unit) {
                 }
             }
         }
-        Surface(tonalElevation = 3.dp) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     when (changes.size) {
                         0 -> "No differences yet"
@@ -109,8 +121,8 @@ fun CountScreen(vm: InventoryViewModel, showMessage: (String) -> Unit) {
 private fun CountRow(item: Item, value: String, onChange: (String) -> Unit) {
     val counted = parseNum(value)
     val diff = counted?.minus(item.quantity)
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    AppCard(selected = counted != null) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(item.name, style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -123,13 +135,13 @@ private fun CountRow(item: Item, value: String, onChange: (String) -> Unit) {
             Text(
                 when {
                     diff == null -> ""
-                    diff == 0.0 -> "✓"
+                    diff == 0.0 -> "✓ Match"
                     else -> diff.signed()
                 },
-                color = if (diff != null && diff != 0.0) changeColor(diff) else MaterialTheme.colorScheme.primary,
+                color = if (diff != null && diff != 0.0) changeColor(diff) else com.dorobistro.inventory.ui.theme.LocalStatusColors.current.success,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.End,
-                modifier = Modifier.width(72.dp),
+                modifier = Modifier.width(84.dp),
             )
         }
     }

@@ -33,6 +33,10 @@ abstract class InventoryDao {
     )
     abstract fun observeMovementsForItem(itemId: Long): Flow<List<MovementWithItem>>
 
+    /** Raw movements since [since] (ms). Feeds the replenishment forecast and the insights report. */
+    @Query("SELECT * FROM movements WHERE timestamp >= :since ORDER BY timestamp, id")
+    abstract fun observeMovementsSince(since: Long): Flow<List<StockMovement>>
+
     @Query("SELECT * FROM items WHERE id = :id")
     abstract suspend fun getItem(id: Long): Item?
 
@@ -46,27 +50,54 @@ abstract class InventoryDao {
 
     @Insert abstract suspend fun insertMovement(movement: StockMovement): Long
 
-    /** Adds [change] (may be negative) to the item and logs it. Quantity never goes below zero. */
+    @Query("SELECT * FROM movements WHERE id = :id")
+    abstract suspend fun getMovement(id: Long): StockMovement?
+
+    @Query("SELECT id FROM movements WHERE itemId = :itemId ORDER BY timestamp DESC, id DESC LIMIT 1")
+    abstract suspend fun latestMovementId(itemId: Long): Long?
+
+    @Query("DELETE FROM movements WHERE id = :id")
+    abstract suspend fun deleteMovementById(id: Long)
+
+    /**
+     * Adds [change] (may be negative) to the item and logs it. Quantity never goes below zero.
+     * Returns the id of the logged movement, or null if nothing changed.
+     */
     @Transaction
-    open suspend fun adjustStock(itemId: Long, change: Double, type: MovementType, note: String) {
-        val item = getItem(itemId) ?: return
+    open suspend fun adjustStock(itemId: Long, change: Double, type: MovementType, note: String): Long? {
+        val item = getItem(itemId) ?: return null
         val newQty = (item.quantity + change).coerceAtLeast(0.0)
         val applied = newQty - item.quantity
-        if (applied == 0.0) return
+        if (applied == 0.0) return null
         updateItem(item.copy(quantity = newQty, updatedAt = System.currentTimeMillis()))
-        insertMovement(StockMovement(itemId = itemId, type = type, change = applied, quantityAfter = newQty, note = note))
+        return insertMovement(StockMovement(itemId = itemId, type = type, change = applied, quantityAfter = newQty, note = note))
     }
 
-    /** Sets the item to a physically counted quantity and logs the correction. */
+    /** Sets the item to a physically counted quantity and logs the correction. Returns the movement id. */
     @Transaction
-    open suspend fun setCount(itemId: Long, counted: Double, note: String) {
-        val item = getItem(itemId) ?: return
+    open suspend fun setCount(itemId: Long, counted: Double, note: String): Long? {
+        val item = getItem(itemId) ?: return null
         val newQty = counted.coerceAtLeast(0.0)
-        if (newQty == item.quantity) return
+        if (newQty == item.quantity) return null
         updateItem(item.copy(quantity = newQty, updatedAt = System.currentTimeMillis()))
-        insertMovement(
+        return insertMovement(
             StockMovement(itemId = itemId, type = MovementType.COUNT, change = newQty - item.quantity, quantityAfter = newQty, note = note)
         )
+    }
+
+    /**
+     * Reverses a movement, but only if it is still the item's most recent one (so history stays consistent).
+     * Returns true if it was undone.
+     */
+    @Transaction
+    open suspend fun undoMovement(movementId: Long): Boolean {
+        val m = getMovement(movementId) ?: return false
+        if (latestMovementId(m.itemId) != movementId) return false
+        val item = getItem(m.itemId) ?: return false
+        val restored = (m.quantityAfter - m.change).coerceAtLeast(0.0)
+        updateItem(item.copy(quantity = restored, updatedAt = System.currentTimeMillis()))
+        deleteMovementById(movementId)
+        return true
     }
 
     @Transaction

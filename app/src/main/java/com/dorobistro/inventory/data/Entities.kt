@@ -18,6 +18,8 @@ data class Supplier(
     val phone: String = "",
     val email: String = "",
     val notes: String = "",
+    /** Days between placing an order and the delivery arriving. Used by the replenishment forecast. */
+    @ColumnInfo(defaultValue = "2") val leadTimeDays: Int = 2,
 )
 
 @Entity(

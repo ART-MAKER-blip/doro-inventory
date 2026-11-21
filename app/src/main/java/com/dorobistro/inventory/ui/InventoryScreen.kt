@@ -1,6 +1,7 @@
 package com.dorobistro.inventory.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -36,19 +38,17 @@ import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
@@ -65,44 +65,70 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dorobistro.inventory.data.Forecast
+import com.dorobistro.inventory.data.ForecastStatus
+import com.dorobistro.inventory.data.Forecasting
 import com.dorobistro.inventory.data.Item
 import com.dorobistro.inventory.data.MovementType
 import com.dorobistro.inventory.data.Supplier
 import com.dorobistro.inventory.data.isLow
-import com.dorobistro.inventory.data.suggestedOrder
+import com.dorobistro.inventory.data.recommendedOrder
+import com.dorobistro.inventory.data.targetLevel
 import java.time.LocalDate
+import java.time.ZoneId
 
 private const val DAY_MS = 86_400_000L
 
+private enum class SortBy(val label: String) { Name("Name"), Status("Needs attention first"), DaysLeft("Days of stock left") }
+
 @Composable
-fun InventoryScreen(vm: InventoryViewModel) {
+fun InventoryScreen(vm: InventoryViewModel, messenger: Messenger) {
     val items by vm.items.collectAsStateWithLifecycle()
     val suppliers by vm.suppliers.collectAsStateWithLifecycle()
+    val forecasts by vm.forecasts.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf<String?>(null) }
     var lowOnly by rememberSaveable { mutableStateOf(false) }
+    var sortBy by rememberSaveable { mutableStateOf(SortBy.Name) }
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editing by remember { mutableStateOf<Item?>(null) }
     var creating by remember { mutableStateOf(false) }
 
     val categories = remember(items) { items.map { it.category }.filter { it.isNotBlank() }.distinct().sortedBy { it.lowercase() } }
     val supplierNames = remember(suppliers) { suppliers.associate { it.id to it.name } }
-    val filtered = remember(items, query, category, lowOnly) {
-        items.filter {
+    val filtered = remember(items, query, category, lowOnly, sortBy, forecasts) {
+        val list = items.filter {
             (query.isBlank() || it.name.contains(query, true) || it.category.contains(query, true)) &&
                 (category == null || it.category == category) &&
                 (!lowOnly || it.isLow())
         }
+        when (sortBy) {
+            SortBy.Name -> list
+            SortBy.Status -> list.sortedWith(compareBy({ it.stockTone().ordinal * -1 }, { forecasts[it.id]?.daysOfStock ?: Double.MAX_VALUE }))
+            SortBy.DaysLeft -> list.sortedBy { forecasts[it.id]?.daysOfStock ?: Double.MAX_VALUE }
+        }
     }
     val selected = items.firstOrNull { it.id == selectedId }
 
+    val quick: (Item, Double) -> Unit = { item, delta ->
+        vm.quickAdjust(item, delta) { movementId ->
+            if (movementId != null) {
+                val verb = if (delta > 0) "Added" else "Used"
+                messenger.showWithAction("$verb 1 ${item.unit} of ${item.name}", "Undo") {
+                    vm.undo(movementId) { ok -> if (!ok) messenger.show("Can't undo: ${item.name} has changed since") }
+                }
+            }
+        }
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val twoPane = maxWidth >= 720.dp
+        val twoPane = maxWidth >= 760.dp
         BackHandler(enabled = !twoPane && selected != null) { selectedId = null }
 
         val list: @Composable (Modifier) -> Unit = { mod ->
@@ -123,12 +149,15 @@ fun InventoryScreen(vm: InventoryViewModel) {
                         if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "Clear search") }
                     },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp),
                 )
                 Row(
-                    Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp),
+                    Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    SortMenu(sortBy) { sortBy = it }
+                    VerticalDivider(Modifier.padding(horizontal = 4.dp).size(width = 1.dp, height = 24.dp))
                     FilterChip(selected = lowOnly, onClick = { lowOnly = !lowOnly }, label = { Text("Low stock only") })
                     FilterChip(selected = category == null, onClick = { category = null }, label = { Text("All") })
                     categories.forEach { c ->
@@ -143,17 +172,18 @@ fun InventoryScreen(vm: InventoryViewModel) {
                     EmptyState(Icons.Outlined.Search, "No matches", "Try a different search or clear the filters.")
                 } else {
                     LazyColumn(
-                        contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(start = 28.dp, end = 28.dp, top = 4.dp, bottom = 28.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(filtered, key = { it.id }) { item ->
                             ItemRow(
                                 item = item,
+                                forecast = forecasts[item.id],
                                 supplierName = item.supplierId?.let { supplierNames[it] },
                                 selected = item.id == selectedId,
                                 onClick = { selectedId = item.id },
-                                onMinus = { vm.quickAdjust(item, -1.0) },
-                                onPlus = { vm.quickAdjust(item, 1.0) },
+                                onMinus = { quick(item, -1.0) },
+                                onPlus = { quick(item, 1.0) },
                             )
                         }
                     }
@@ -164,6 +194,7 @@ fun InventoryScreen(vm: InventoryViewModel) {
         val detail: @Composable (Item) -> Unit = { item ->
             ItemDetailPane(
                 item = item,
+                forecast = forecasts[item.id],
                 supplier = suppliers.firstOrNull { it.id == item.supplierId },
                 vm = vm,
                 showBack = !twoPane,
@@ -175,10 +206,12 @@ fun InventoryScreen(vm: InventoryViewModel) {
         if (twoPane) {
             Row(Modifier.fillMaxSize()) {
                 list(Modifier.weight(1f).fillMaxHeight())
-                VerticalDivider()
-                Box(Modifier.weight(0.85f).fillMaxHeight()) {
+                Box(
+                    Modifier.weight(0.9f).fillMaxHeight().padding(top = 16.dp, end = 20.dp, bottom = 20.dp)
+                        .clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surface)
+                ) {
                     if (selected != null) detail(selected)
-                    else EmptyState(Icons.Outlined.TouchApp, "Select an item", "Tap an item to see its details, adjust stock and view its history.")
+                    else EmptyState(Icons.Outlined.TouchApp, "Select an item", "Tap an item to see its forecast, adjust stock and view its history.")
                 }
             }
         } else {
@@ -198,8 +231,22 @@ fun InventoryScreen(vm: InventoryViewModel) {
 }
 
 @Composable
+private fun SortMenu(current: SortBy, onSelect: (SortBy) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        AssistChip(onClick = { open = true }, label = { Text("Sort: ${current.label}") })
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            SortBy.entries.forEach { s ->
+                DropdownMenuItem(text = { Text(s.label) }, onClick = { onSelect(s); open = false })
+            }
+        }
+    }
+}
+
+@Composable
 private fun ItemRow(
     item: Item,
+    forecast: Forecast?,
     supplierName: String?,
     selected: Boolean,
     onClick: () -> Unit,
@@ -207,12 +254,9 @@ private fun ItemRow(
     onPlus: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    Card(
-        onClick = onClick,
-        colors = CardDefaults.cardColors(containerColor = if (selected) cs.secondaryContainer else cs.surfaceContainerLow),
-    ) {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    AppCard(onClick = onClick, selected = selected) {
+        Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 12.dp, top = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         item.name,
@@ -230,15 +274,36 @@ private fun ItemRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StockLevelBar(item, Modifier.widthIn(max = 220.dp).weight(1f, fill = false).fillMaxWidth())
+                    val left = daysLeftText(forecast)
+                    if (left != null) {
+                        val tone = when {
+                            (forecast?.daysOfStock ?: 99.0) < 3 -> Tone.Danger
+                            (forecast?.daysOfStock ?: 99.0) < 7 -> Tone.Warning
+                            else -> Tone.Neutral
+                        }
+                        Text(left, style = MaterialTheme.typography.labelMedium, color = if (tone == Tone.Neutral) cs.onSurfaceVariant else tone.strong())
+                    }
+                }
             }
-            FilledTonalIconButton(onClick = onMinus, enabled = item.quantity > 0, modifier = Modifier.size(48.dp)) {
+            FilledTonalIconButton(
+                onClick = onMinus,
+                enabled = item.quantity > 0,
+                modifier = Modifier.size(48.dp),
+                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = cs.surfaceContainerHigh),
+            ) {
                 Icon(Icons.Outlined.Remove, "Use one")
             }
             Column(Modifier.widthIn(min = 84.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(item.quantity.fmt(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(item.quantity.fmt(), style = MaterialTheme.typography.titleLarge)
                 Text(item.unit, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
             }
-            FilledTonalIconButton(onClick = onPlus, modifier = Modifier.size(48.dp)) {
+            FilledTonalIconButton(
+                onClick = onPlus,
+                modifier = Modifier.size(48.dp),
+                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = cs.primaryContainer, contentColor = cs.onPrimaryContainer),
+            ) {
                 Icon(Icons.Outlined.Add, "Add one")
             }
         }
@@ -248,6 +313,7 @@ private fun ItemRow(
 @Composable
 private fun ItemDetailPane(
     item: Item,
+    forecast: Forecast?,
     supplier: Supplier?,
     vm: InventoryViewModel,
     showBack: Boolean,
@@ -255,62 +321,104 @@ private fun ItemDetailPane(
     onEdit: () -> Unit,
 ) {
     val history by remember(item.id) { vm.movementsFor(item.id) }.collectAsStateWithLifecycle(emptyList())
+    val window by vm.windowMovements.collectAsStateWithLifecycle()
     var adjustType by remember { mutableStateOf<MovementType?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
+    val levels = remember(window, item) {
+        Forecasting.stockLevels(item, window.filter { it.itemId == item.id }, 14, LocalDate.now(), ZoneId.systemDefault())
+    }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
-            Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) {
                     Icon(if (showBack) Icons.AutoMirrored.Outlined.ArrowBack else Icons.Outlined.Close, "Close")
                 }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Edit item") }
-                IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Outlined.Delete, "Delete item") }
+                TextButton(onClick = onEdit) {
+                    Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Edit")
+                }
+                IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Outlined.Delete, "Delete item", tint = cs.error) }
             }
         }
         item {
             Column(Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(item.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                    Text(item.category.ifBlank { "Uncategorized" }, color = cs.onSurfaceVariant)
-                    StatusPills(item)
+                    Text(item.name, style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        listOfNotNull(item.category.ifBlank { "Uncategorized" }, supplier?.name).joinToString(" · "),
+                        color = cs.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        StatusPills(item)
+                        if (forecast != null && forecast.status != ForecastStatus.HEALTHY) ForecastBadge(forecast)
+                    }
                 }
-                Card(colors = CardDefaults.cardColors(containerColor = cs.primaryContainer, contentColor = cs.onPrimaryContainer)) {
-                    Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.Bottom) {
-                        Text(item.quantity.fmt(), style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.SemiBold)
-                        Text(" ${item.unit} on hand", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+                // On-hand summary
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(cs.primary).padding(20.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("ON HAND", style = MaterialTheme.typography.labelSmall, color = cs.onPrimary.copy(alpha = 0.75f))
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(item.quantity.fmt(), style = MaterialTheme.typography.displaySmall, color = cs.onPrimary)
+                            Text(" ${item.unit}", style = MaterialTheme.typography.titleMedium, color = cs.onPrimary, modifier = Modifier.padding(bottom = 6.dp))
+                            Spacer(Modifier.weight(1f))
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("Value", style = MaterialTheme.typography.labelSmall, color = cs.onPrimary.copy(alpha = 0.75f))
+                                Text(money(item.quantity * item.costPerUnit), style = MaterialTheme.typography.titleMedium, color = cs.onPrimary)
+                            }
+                        }
+                        daysLeftText(forecast)?.let {
+                            Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onPrimary.copy(alpha = 0.9f))
+                        }
                     }
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(onClick = { adjustType = MovementType.DELIVERY }) {
-                        Icon(MovementType.DELIVERY.icon(), null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Receive")
-                    }
-                    FilledTonalButton(onClick = { adjustType = MovementType.USAGE }) {
-                        Icon(MovementType.USAGE.icon(), null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Use")
-                    }
-                    FilledTonalButton(onClick = { adjustType = MovementType.WASTE }) {
-                        Icon(MovementType.WASTE.icon(), null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Waste")
-                    }
-                    FilledTonalButton(onClick = { adjustType = MovementType.COUNT }) {
-                        Icon(MovementType.COUNT.icon(), null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Count")
+                    listOf(
+                        MovementType.DELIVERY to "Receive",
+                        MovementType.USAGE to "Use",
+                        MovementType.WASTE to "Waste",
+                        MovementType.COUNT to "Count",
+                    ).forEach { (t, label) ->
+                        OutlinedButton(onClick = { adjustType = t }) {
+                            Icon(t.icon(), null, Modifier.size(18.dp), tint = t.tone().strong()); Spacer(Modifier.width(8.dp)); Text(label)
+                        }
                     }
                 }
-                Card(colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerLow)) {
-                    Column(Modifier.padding(vertical = 8.dp)) {
-                        Fact("Minimum level", "${item.minQuantity.fmt()} ${item.unit}")
-                        Fact("Par level", if (item.parLevel > 0) "${item.parLevel.fmt()} ${item.unit}" else "Not set")
-                        if (item.isLow()) Fact("Suggested order", "${item.suggestedOrder().fmt()} ${item.unit}")
-                        Fact("Cost per unit", if (item.costPerUnit > 0) money(item.costPerUnit) else "Not set")
-                        Fact("Stock value", money(item.quantity * item.costPerUnit))
-                        Fact("Supplier", supplier?.name ?: "None")
-                        Fact("Expiry date", item.expiryEpochDay?.let { formatDay(it) } ?: "None")
-                        Fact("Last updated", formatTime(item.updatedAt))
-                        if (item.notes.isNotBlank()) Fact("Notes", item.notes)
+
+                // Forecast
+                SectionCard("Stock forecast", subtitle = forecast?.let { forecastSubtitle(it) }) {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StockProjectionChart(
+                            history = levels,
+                            dailyUsage = if ((forecast?.dataDays ?: 0) >= Forecasting.MIN_DATA_DAYS) forecast?.dailyUsage ?: 0.0 else 0.0,
+                            minLevel = item.minQuantity,
+                            parLevel = item.targetLevel(),
+                            unit = item.unit,
+                        )
+                        if (forecast != null) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                                SmallFact("Usage / day", if (forecast.dailyUsage > 0) "${forecast.dailyUsage.fmt1()} ${item.unit}" else "–")
+                                SmallFact("Runs out", forecast.stockOutDay?.let { relativeDay(it) } ?: "–")
+                                SmallFact("Order by", if (forecast.status == ForecastStatus.ORDER_NOW) "Today" else forecast.orderByDay?.takeIf { forecast.dailyUsage > 0 }?.let { relativeDay(it) } ?: "–")
+                                SmallFact("Suggested", item.recommendedOrder(forecast).let { if (it > 0) "${it.fmt()} ${item.unit}" else "–" })
+                            }
+                            TrendLabel(forecast.trendPercent)
+                        }
                     }
                 }
-                Text("History", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+
+                // Details
+                SectionCard("Details") {
+                    Fact("Minimum level", "${item.minQuantity.fmt()} ${item.unit}")
+                    Fact("Par level", if (item.parLevel > 0) "${item.parLevel.fmt()} ${item.unit}" else "Not set")
+                    Fact("Cost per unit", if (item.costPerUnit > 0) money(item.costPerUnit) else "Not set")
+                    Fact("Supplier", supplier?.let { "${it.name} (${it.leadTimeDays}-day lead time)" } ?: "None")
+                    Fact("Expiry date", item.expiryEpochDay?.let { formatDay(it) } ?: "None")
+                    Fact("Last updated", formatTime(item.updatedAt))
+                    if (item.notes.isNotBlank()) Fact("Notes", item.notes)
+                }
+                Text("History", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
             }
         }
         if (history.isEmpty()) {
@@ -338,11 +446,25 @@ private fun ItemDetailPane(
     }
 }
 
+private fun forecastSubtitle(f: Forecast): String = when (f.status) {
+    ForecastStatus.LEARNING -> "Learning: needs ${Forecasting.MIN_DATA_DAYS} days of history"
+    ForecastStatus.NO_USAGE -> "No usage in the last ${f.dataDays} days"
+    else -> "Based on the last ${f.dataDays} days · ${f.leadTimeDays}-day lead time"
+}
+
+@Composable
+private fun SmallFact(label: String, value: String) {
+    Column {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleSmall)
+    }
+}
+
 @Composable
 private fun Fact(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-        Text(value, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1.3f))
+        Text(value, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1.4f))
     }
 }
 

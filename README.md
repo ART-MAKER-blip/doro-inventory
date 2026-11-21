@@ -1,6 +1,6 @@
 # D'oro Inventory
 
-An offline inventory app for Android tablets, built for the D'oro bistro kitchen. It tracks stock levels, deliveries, usage and waste, warns when items run low or are close to expiring, and builds a reorder list grouped by supplier.
+An offline inventory app for Android tablets, built for the D'oro bistro kitchen. It tracks stock levels, deliveries, usage and waste, warns when items run low or are close to expiring, **predicts when each item will run out and when to order it**, and builds a reorder list grouped by supplier.
 
 All data stays on the tablet. The app needs no internet connection, account or server.
 
@@ -23,14 +23,18 @@ All data stays on the tablet. The app needs no internet connection, account or s
 
 ## Features
 
+The navigation sidebar groups the screens into **Overview**, **Stock**, **Planning** and **Manage**. On wide tablets it shows labels; on smaller screens it collapses to an icon rail.
+
 | Screen | What it does |
 |---|---|
-| **Dashboard** | Shows item count, low stock, out of stock, items expiring within 3 days, total stock value, items that need attention, and recent activity. |
-| **Inventory** | Lists all items with search and category filters. Large − / + buttons adjust stock quickly. On a tablet, the selected item's details and history show next to the list. |
-| **Count** | Stock-taking: enter what's actually on the shelf for each item, then save all the differences at once. |
-| **Reorder** | Lists every item at or below its minimum, grouped by supplier, with a suggested order quantity and estimated cost. Orders can be shared through any messaging or email app. Tap **Received** to record the delivery. |
+| **Dashboard** | Stock value, items to order, items forecast to run out within 7 days, items expiring within 3 days and waste in the last 7 days. Below that: what's predicted to run out, what needs attention, and recent activity. Every tile opens the related screen. |
+| **Inventory** | All items with search, category filters and sorting (by name, by what needs attention, or by days of stock left). Each item shows a stock-level bar (against par, with a tick at the minimum) and how many days of stock are left. Large − / + buttons adjust stock quickly, with **Undo** in case of a mis-tap. On a tablet, the selected item's details, stock forecast chart and history show next to the list. |
+| **Stock count** | Stock-taking: enter what's actually on the shelf for each item, with a progress bar, then save all the differences at once. |
 | **History** | A log of every stock change (delivery, usage, waste, count), grouped by day and filterable by type. |
-| **Suppliers** | Supplier names, contact person, phone, email and notes, linked to their items. |
+| **Forecast** | **Predictive replenishment.** For every item: average daily usage and its trend, predicted stock-out date, the date to order by (based on the supplier's lead time) and a suggested order quantity. Tap an item for a 14-day history + 14-day projection chart and a plain-language explanation of the numbers. |
+| **Reorder** | Everything that needs ordering, grouped by supplier: items below their minimum **and** items the forecast says will run short before the next delivery. Shows why each item is listed, the suggested quantity and estimated cost. Orders can be shared through any messaging or email app. Tap **Received** to record the delivery. |
+| **Insights** | Cost and waste report for the last 7, 14 or 30 days: value of stock used, waste and waste rate (with change vs. the previous period), deliveries, and shortfalls found in stock counts. Includes a daily chart, the most-wasted items, the biggest food costs, and **smart suggestions** such as lowering a par level for an item that's often thrown away, or raising one when demand is rising. |
+| **Suppliers** | Supplier names, contact person, phone, email, notes and **lead time** (days from ordering to delivery), linked to their items. |
 | **Backup** | Export all data to a JSON file, or restore from one. |
 
 Each item has these fields:
@@ -45,13 +49,34 @@ Stock quantities only change through logged movements, so every change has a rec
 
 ---
 
+## Predictive replenishment
+
+The forecast learns from each item's own history and runs entirely on the tablet. It is recalculated whenever stock, suppliers or history change.
+
+1. **Daily usage.** Everything that left the shelf over the last 28 complete days: usage, waste, and shortfalls found during stock counts (so kitchens that only do counts still get forecasts). When there are at least two weeks of history, the last 7 days count for 60%, so busier or quieter weeks show up quickly. The **trend** compares the last 7 days with the weeks before.
+2. **Runs out** = stock on hand ÷ daily usage.
+3. **Order by** = the day stock falls to the *reorder point*: enough to last through the supplier's lead time plus a 2-day safety buffer.
+4. **Suggested order** = enough for the lead time + the next 7 days + the safety buffer, minus what will still be on the shelf on the order-by date. If an item is below its minimum, the par-level suggestion is used when it's larger.
+
+| Status | Meaning |
+|---|---|
+| **Order now** | Below minimum, or the order-by date is today (or has passed). |
+| **Order soon** | Order within the next 3 days. |
+| **Healthy** | Enough stock to get past the next delivery. |
+| **Learning** | Fewer than 3 days of history. Record usage (the − button), waste or stock counts and it will start forecasting. |
+| **No recent usage** | Nothing used in the last 28 days. |
+
+To get good forecasts, set each supplier's **lead time** and record usage regularly (the − button or **Use**), or do regular stock counts. The constants (28-day window, 7-day cover, 2-day safety buffer) are in `data/Forecast.kt`.
+
+---
+
 ## Tech stack
 
 | Part | Technology |
 |---|---|
 | Platform | Android (native app) |
 | Language | [Kotlin](https://kotlinlang.org/) 2.2 |
-| UI | [Jetpack Compose](https://developer.android.com/compose) with Material 3 |
+| UI | [Jetpack Compose](https://developer.android.com/compose) with Material 3, custom navy/slate theme |
 | Database | [Room](https://developer.android.com/training/data-storage/room) 2.7 (SQLite) |
 | Code generation | KSP (generates Room's database code) |
 | State | AndroidViewModel + Kotlin Flow / StateFlow |
@@ -82,6 +107,7 @@ The file is private to the app, so it doesn't appear in the tablet's file manage
 | id | INTEGER | primary key |
 | name | TEXT | |
 | contactName, phone, email, notes | TEXT | |
+| leadTimeDays | INTEGER | days from order to delivery, default 2 (added in database version 2) |
 
 **`items`**
 
@@ -110,7 +136,11 @@ The file is private to the app, so it doesn't appear in the tablet's file manage
 | note | TEXT | |
 | timestamp | INTEGER | Unix time in ms |
 
-Each stock change runs in a single database transaction that updates the item and adds the movement together, so the two can't get out of sync.
+Each stock change runs in a single database transaction that updates the item and adds the movement together, so the two can't get out of sync. **Undo** only reverses an item's most recent movement, for the same reason.
+
+### Upgrading from version 1
+
+The database is now at version 2. When you install this version over the old one, a migration adds the `leadTimeDays` column to suppliers (default 2 days). **Your existing items, suppliers and history are kept.** Backups from version 1 can still be restored; their suppliers get the default lead time.
 
 ---
 
@@ -121,21 +151,29 @@ app/src/main/java/com/dorobistro/inventory/
 ├── MainActivity.kt            App entry point
 ├── data/
 │   ├── Entities.kt            Item, Supplier, StockMovement + low-stock / expiry rules
-│   ├── InventoryDao.kt        Database queries and stock-change transactions
-│   ├── AppDatabase.kt         Room database setup
+│   ├── Forecast.kt            Predictive replenishment (usage rate, stock-out, order-by, quantity)
+│   ├── Insights.kt            Cost & waste report and smart suggestions
+│   ├── SampleData.kt          Sample items with four weeks of realistic history
+│   ├── InventoryDao.kt        Database queries, stock-change transactions, undo
+│   ├── AppDatabase.kt         Room database setup and migration 1 → 2
 │   └── Backup.kt              JSON export / import
 └── ui/
-    ├── App.kt                 Navigation rail and screen switching
-    ├── InventoryViewModel.kt  Connects the screens to the database
-    ├── Components.kt          Shared UI pieces and formatting helpers
+    ├── App.kt                 Sidebar navigation and screen switching
+    ├── InventoryViewModel.kt  Connects the screens to the database and forecast
+    ├── Components.kt          Shared UI pieces (cards, badges, stock bars, KPI tiles) and formatting
     ├── DashboardScreen.kt
-    ├── InventoryScreen.kt     List, detail pane, add/edit and adjust dialogs
+    ├── InventoryScreen.kt     List, detail pane with forecast chart, add/edit and adjust dialogs
     ├── CountScreen.kt
-    ├── ReorderScreen.kt
     ├── HistoryScreen.kt
+    ├── ForecastScreen.kt      Predictive replenishment table, detail dialog and projection chart
+    ├── ReorderScreen.kt
+    ├── InsightsScreen.kt      Cost & waste insights
     ├── SuppliersScreen.kt
     ├── BackupScreen.kt
-    └── theme/Theme.kt         Gold colour theme (light and dark)
+    └── theme/Theme.kt         Navy & slate theme with gold accent, status colours (light and dark)
+
+app/src/test/java/com/dorobistro/inventory/data/
+└── ForecastTest.kt            Unit tests for the forecast and sample data
 ```
 
 ---
@@ -238,14 +276,24 @@ Build and install again the same way. The data on the tablet is kept. Uninstalli
 
 ## Using the app
 
-1. **First run:** the dashboard offers **Load sample data** so you can explore the app with example items. To start fresh instead, go to **Inventory → Add item**.
-2. **Add suppliers** under **Suppliers**, then link items to them when adding or editing an item.
+1. **First run:** the dashboard offers **Load sample data** so you can explore the app with example items and four weeks of history (so the forecast and insights have data). To start fresh instead, go to **Inventory → Add item**.
+2. **Add suppliers** under **Suppliers**, including how many days they take to deliver (lead time), then link items to them when adding or editing an item.
 3. **Set min and par levels** on each item. For example, tomatoes with min 5 kg and par 15 kg are marked *Low* at 5 kg, and the reorder list suggests ordering back up to 15 kg.
 4. **Day to day:**
    - Tap **−** / **+** on an item for quick one-unit changes.
    - Tap an item, then **Receive**, **Use**, **Waste** or **Count** to record larger amounts with a note.
-5. **Ordering:** open **Reorder**, share each supplier's list, and tap **Received** when the delivery arrives.
-6. **Stock-taking:** open **Count**, walk the shelves entering actual quantities, then tap **Save count**.
+5. **Planning:** open **Forecast** to see what will run out and when to order it. Tap an item for its chart and an explanation.
+6. **Ordering:** open **Reorder**, share each supplier's list, and tap **Received** when the delivery arrives.
+7. **Waste:** check **Insights** weekly for waste costs and suggestions.
+8. **Stock-taking:** open **Stock count**, walk the shelves entering actual quantities, then tap **Save count**.
+
+### Running the tests
+
+The forecast logic has unit tests. In Android Studio, right-click `app/src/test` and choose **Run 'Tests in…'**, or from the command line:
+
+```sh
+./gradlew testDebugUnitTest
+```
 
 ---
 

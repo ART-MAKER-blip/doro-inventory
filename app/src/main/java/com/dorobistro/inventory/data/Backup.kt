@@ -6,7 +6,7 @@ import org.json.JSONObject
 /** Plain JSON backup format so data can be moved between tablets or restored after a reset. */
 object Backup {
     private const val FORMAT = "doro-inventory"
-    private const val VERSION = 1
+    private const val VERSION = 2
 
     data class Data(
         val suppliers: List<Supplier>,
@@ -25,6 +25,7 @@ object Backup {
                     JSONObject()
                         .put("id", it.id).put("name", it.name).put("contactName", it.contactName)
                         .put("phone", it.phone).put("email", it.email).put("notes", it.notes)
+                        .put("leadTimeDays", it.leadTimeDays)
                 )
             }
         })
@@ -68,6 +69,8 @@ object Backup {
                 id = it.getLong("id"), name = it.getString("name"),
                 contactName = it.optString("contactName"), phone = it.optString("phone"),
                 email = it.optString("email"), notes = it.optString("notes"),
+                // Version 1 backups have no lead time; fall back to the default.
+                leadTimeDays = it.optInt("leadTimeDays", 2),
             )
         }
         val items = root.getJSONArray("items").objects().map {
