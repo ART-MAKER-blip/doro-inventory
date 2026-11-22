@@ -86,7 +86,10 @@ fun Double.fmt1(): String =
 fun Double.signed(): String = if (this > 0) "+${fmt()}" else fmt()
 fun Double.fieldText(): String = if (this == 0.0) "" else fmt()
 fun parseNum(s: String): Double? = s.trim().replace(',', '.').toDoubleOrNull()
-fun money(v: Double): String = NumberFormat.getCurrencyInstance().format(v)
+/** Prices are in Philippine pesos (₱), whatever the tablet's language setting. */
+fun money(v: Double): String = pesoFormat.format(v)
+
+private val pesoFormat: NumberFormat = NumberFormat.getCurrencyInstance(java.util.Locale("en", "PH")).apply { currency = java.util.Currency.getInstance("PHP") }
 
 private val timeFmt = DateTimeFormatter.ofPattern("MMM d, HH:mm")
 private val clockFmt = DateTimeFormatter.ofPattern("HH:mm")

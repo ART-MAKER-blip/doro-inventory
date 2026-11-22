@@ -101,14 +101,18 @@ class InventoryViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Loads sample suppliers and items with four weeks of history, so forecasts and insights work right away. */
     fun loadSampleData() = viewModelScope.launch {
-        val produce = dao.insertSupplier(Supplier(name = "Fresh Farms Produce", contactName = "Order desk", phone = "555-0101", leadTimeDays = 1, notes = "Delivers daily before 8am"))
-        val meats = dao.insertSupplier(Supplier(name = "Prime Cuts Meats", contactName = "Sales", phone = "555-0102", leadTimeDays = 2))
-        val dairy = dao.insertSupplier(Supplier(name = "Valley Dairy Co.", email = "orders@example.com", leadTimeDays = 2))
-        val dry = dao.insertSupplier(Supplier(name = "Pantry Wholesale", phone = "555-0104", leadTimeDays = 4, notes = "Order by Tuesday for Friday delivery"))
+        val ids = SampleData.SupplierIds(
+            produce = dao.insertSupplier(Supplier(name = "Suki gulayan (Balintawak Market)", leadTimeDays = SampleData.Lead.PRODUCE, notes = "Vegetables, fruit, tube ice. Delivers 6am daily; order by 8pm the night before.")),
+            meats = dao.insertSupplier(Supplier(name = "Suki butcher (Farmers Market Cubao)", leadTimeDays = SampleData.Lead.MEATS, notes = "Pork, chicken, beef, eggs. Delivers daily except Sunday.")),
+            seafood = dao.insertSupplier(Supplier(name = "Navotas Fish Port suki", leadTimeDays = SampleData.Lead.SEAFOOD, notes = "Bangus, shrimp, squid. Early-morning delivery.")),
+            dairy = dao.insertSupplier(Supplier(name = "Chilled & dairy distributor", leadTimeDays = SampleData.Lead.DAIRY, notes = "Milk, cream, butter, cheese, canned milk.")),
+            dry = dao.insertSupplier(Supplier(name = "Puregold Price Club (wholesale)", leadTimeDays = SampleData.Lead.DRY, notes = "Rice, oil, condiments, drinks. Pickup run Tuesday & Friday.")),
+            coffee = dao.insertSupplier(Supplier(name = "Benguet coffee roaster", leadTimeDays = SampleData.Lead.COFFEE, notes = "Arabica beans shipped by courier from Baguio.")),
+        )
         val today = LocalDate.now()
         val zone = ZoneId.systemDefault()
         val random = Random(42)
-        SampleData.specs(produce, meats, dairy, dry, today).forEach { spec ->
+        SampleData.specs(ids, today).forEach { spec ->
             val id = dao.insertItem(spec.item)
             dao.insertMovements(SampleData.history(spec, id, SAMPLE_DAYS, today, zone, random))
         }

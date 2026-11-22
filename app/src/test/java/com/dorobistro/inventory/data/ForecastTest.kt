@@ -68,7 +68,7 @@ class ForecastTest {
     }
 
     @Test fun sampleHistoryIsConsistentAndEndsAtCurrentStock() {
-        SampleData.specs(1, 2, 3, 4, today).forEachIndexed { i, spec ->
+        SampleData.specs(SampleData.SupplierIds(1, 2, 3, 4, 5, 6), today).forEachIndexed { i, spec ->
             val it = spec.item.copy(id = i + 1L)
             val history = SampleData.history(spec.copy(item = it), it.id, 28, today, zone, Random(7))
             var level = 0.0
